@@ -3,30 +3,33 @@ const multer = require('multer');
 const fs = require('fs');
 const child_process = require('child_process');
 const ffmpegPath = require('ffmpeg-static');
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const port = 3000;
 
-const storage = multer.memoryStorage(); // store the file in memory
+const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 app.post('/convert', upload.single('video'), (req, res) => {
-    if (!req.file) {
-        return res.status(400).send('file attachment not found.');
-    }
+    !req.file ? res.status(400).send('File attachment not found.') : (() => {})();
+
+    const { format } = req.body;
 
     const inputVideoBuffer = req.file.buffer;
-    const inputPath = 'temp_input.mp4';  // you might want to generate unique filenames
-    const outputPath = 'temp_output.avi'; // and also support different output formats
+    const inputFileType = fileType(inputVideoBuffer);
+
+    !inputFileType ? res.status(400).send('File type not recognized by parser.') : (() => {})();
+
+    const uid = uuidv4();
+    const inputPath = `input_${uid}.${inputFileType.ext}`; 
+    const outputPath = `output_${uid}.${format}`; 
 
     fs.writeFileSync(inputPath, inputVideoBuffer);
 
     // Execute FFmpeg
     child_process.execFile(ffmpegPath, ['-i', inputPath, outputPath], (error) => {
-        if (error) {
-            console.error(error);
-            return res.status(500).send('Error during conversion.');
-        }
+        error ? (console.error(error), res.status(500).send('Error during conversion.')) : (() => {})();
 
         const outputVideoBuffer = fs.readFileSync(outputPath);
 
@@ -34,7 +37,20 @@ app.post('/convert', upload.single('video'), (req, res) => {
         fs.unlinkSync(inputPath);
         fs.unlinkSync(outputPath);
 
-        res.contentType('video/avi');
+        let resContentType = '';
+
+        const supportedAudioFormats = new Set(['mp3', 'ogg', 'wav', 'aac']);
+        const supportedVideoFormats = new Set(['mp4', 'avi', 'mkv']);
+    
+        if (supportedAudioFormats.has(format.toLowerCase())) {
+            resContentType = 'audio/' + format.toLowerCase();
+        } else if (supportedVideoFormats.has(format.toLowerCase())) {
+            resContentType = 'video/' + format.toLowerCase();
+        } else {
+            res.status(400).send('File type not accepted.');
+        }
+
+        res.contentType(resContentType);
         res.send(outputVideoBuffer);
     });
 });
